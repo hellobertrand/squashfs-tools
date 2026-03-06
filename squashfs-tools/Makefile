@@ -90,6 +90,14 @@ LZ4_SUPPORT = 1
 ZSTD_SUPPORT = 1
 
 
+########### Building ZXC support ############
+#
+# The ZXC library is supported
+#
+# To skip building ZXC support comment out the line below.
+ZXC_SUPPORT = 1
+
+
 ######## Specifying default compression ########
 #
 # The next line specifies which compression algorithm is used by default
@@ -224,6 +232,7 @@ XZ_SUPPORT ?= 1
 LZO_SUPPORT ?= 1
 LZ4_SUPPORT ?= 1
 ZSTD_SUPPORT ?= 1
+ZXC_SUPPORT ?= 1
 COMP_DEFAULT ?= gzip
 XATTR_SUPPORT ?= 1
 XATTR_OS_SUPPORT ?= 1
@@ -328,6 +337,18 @@ ifeq ($(COMP_DEFAULT),zstd)
 COMPRESSORS += zstd@(default)
 else
 COMPRESSORS += zstd
+endif
+endif
+
+ifeq ($(ZXC_SUPPORT),1)
+CFLAGS += -DZXC_SUPPORT
+MKSQUASHFS_OBJS += zxc_wrapper.o
+UNSQUASHFS_OBJS += zxc_wrapper.o
+LIBS += -lzxc
+ifeq ($(COMP_DEFAULT),zxc)
+COMPRESSORS += zxc@(default)
+else
+COMPRESSORS += zxc
 endif
 endif
 
