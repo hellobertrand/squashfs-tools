@@ -18,7 +18,6 @@
  *
  * zxc_wrapper.c
  *
- * Support for ZXC compression using the Reusable Context API.
  */
 
 #include <stdio.h>
@@ -45,14 +44,17 @@ static int zxc_options(char *argv[], int argc)
 			fprintf(stderr, "zxc: -Xcompression-level missing "
 				"compression level\n");
 			fprintf(stderr, "zxc: -Xcompression-level it should "
-				"be 1 <= n <= 5\n");
+				"be %d <= n <= %d\n",
+				zxc_min_level(), zxc_max_level());
 			goto failed;
 		}
 
 		compression_level = atoi(argv[1]);
-		if (compression_level < 1 || compression_level > 5) {
+		if (compression_level < zxc_min_level() ||
+		    compression_level > zxc_max_level()) {
 			fprintf(stderr, "zxc: -Xcompression-level invalid, it "
-				"should be 1 <= n <= 5\n");
+				"should be %d <= n <= %d\n",
+				zxc_min_level(), zxc_max_level());
 			goto failed;
 		}
 		return 1;
@@ -91,8 +93,8 @@ static int zxc_extract_options(int block_size, void *buffer, int size)
 
 	SQUASHFS_INSWAP_COMP_OPTS(comp_opts);
 
-	if (comp_opts->compression_level < 1 ||
-	    comp_opts->compression_level > 5) {
+	if (comp_opts->compression_level < zxc_min_level() ||
+	    comp_opts->compression_level > zxc_max_level()) {
 		fprintf(stderr, "zxc: bad compression level in compression "
 			"options structure\n");
 		goto failed;
@@ -118,8 +120,8 @@ static void zxc_display_options(void *buffer, int size)
 
 	SQUASHFS_INSWAP_COMP_OPTS(comp_opts);
 
-	if (comp_opts->compression_level < 1 ||
-	    comp_opts->compression_level > 5) {
+	if (comp_opts->compression_level < zxc_min_level() ||
+	    comp_opts->compression_level > zxc_max_level()) {
 		fprintf(stderr, "zxc: bad compression level in compression "
 			"options structure\n");
 		goto failed;
@@ -175,8 +177,6 @@ static int zxc_squashfs_compress(void *strm, void *dest, void *src, int size,
 {
 	zxc_cctx *ctx;
 	zxc_compress_opts_t opts;
-	size_t bound;
-	uint8_t *bounce;
 	int64_t res;
 
 	pthread_once(&zxc_tls_once, zxc_tls_init);
@@ -194,25 +194,9 @@ static int zxc_squashfs_compress(void *strm, void *dest, void *src, int size,
 		pthread_setspecific(zxc_tls_comp_key, ctx);
 	}
 
-	/*
-	 * zxc_compress_cctx produces a full ZXC archive (header + blocks +
-	 * footer).  We need a bounce buffer since the output may temporarily
-	 * exceed block_size even if the final payload is smaller.
-	 */
-	bound = zxc_compress_bound(size);
-	bounce = malloc(bound);
-	if (!bounce)
+	res = zxc_compress_block(ctx, src, size, dest, block_size, &opts);
+	if (res <= 0)
 		return 0;
-
-	res = zxc_compress_cctx(ctx, src, size, bounce, bound, &opts);
-
-	if (res <= 0 || res > block_size) {
-		free(bounce);
-		return 0;
-	}
-
-	memcpy(dest, bounce, res);
-	free(bounce);
 
 	return (int)res;
 }
@@ -225,7 +209,6 @@ static int zxc_squashfs_uncompress(void *dest, void *src, int size, int outsize,
 			   int *error)
 {
 	zxc_dctx *ctx;
-	zxc_decompress_opts_t opts;
 	int64_t res;
 
 	pthread_once(&zxc_tls_once, zxc_tls_init);
@@ -240,10 +223,7 @@ static int zxc_squashfs_uncompress(void *dest, void *src, int size, int outsize,
 		pthread_setspecific(zxc_tls_decomp_key, ctx);
 	}
 
-	memset(&opts, 0, sizeof(opts));
-	opts.checksum_enabled = 0;
-	res = zxc_decompress_dctx(ctx, src, size, dest, outsize, &opts);
-
+	res = zxc_decompress_block_safe(ctx, src, size, dest, outsize, NULL);
 	if (res < 0) {
 		fprintf(stderr, "\t%d %d zxc error %lld\n", outsize, size,
 			(long long)res);
@@ -261,7 +241,8 @@ static int zxc_squashfs_uncompress(void *dest, void *src, int size, int outsize,
 static void zxc_usage(FILE *stream, int cols)
 {
 	autowrap_print(stream, "\t  -Xcompression-level <compression-level>\n", cols);
-	autowrap_printf(stream, cols, "\t\t<compression-level> should be 1 .. 5 (default %d).\n", ZXC_LEVEL_DEFAULT);
+	autowrap_printf(stream, cols, "\t\t<compression-level> should be %d .. %d (default %d).\n",
+		zxc_min_level(), zxc_max_level(), zxc_default_level());
 }
 
 static int option_args(char *option)
